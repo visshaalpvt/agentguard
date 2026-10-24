@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentGuard | AI-Agent & Software Testing Workbench</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <div class="eyebrow">Enterprise Software Quality Engineering</div>
+    <h1>AgentGuard</h1>
+    <p>Custom Application Testing Workbench · Automated API Tests · AI-Agent Safety & Quality Gate</p>
+  </div>
+
+  <div class="app-switcher-bar">
+    <form method="post" action="/app/select" style="display:flex; align-items:center; gap:8px;">
+      <label for="app_select">Target App:</label>
+      <select id="app_select" name="app_id" onchange="this.form.submit()">
+        {% for a in apps %}
+          <option value="{{ a.id }}" {% if a.id == active_app.id %}selected{% endif %}>
+            #{{ a.id }} — {{ a.name }} ({{ a.app_type }})
+          </option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+</header>
+
+<main>
+  <!-- Flash Messages -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <section class="flash-wrap">
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      </section>
+    {% endif %}
+  {% endwith %}
+
+  <!-- Top Metrics Bar -->
+  <section class="metrics">
+    <div class="metric">
+      <span>Active Target</span>
+      <strong style="font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ active_app.name }}</strong>
+      <small>{{ active_app.app_type }} · <code>{{ active_app.base_url }}</code></small>
+    </div>
+    <div class="metric">
+      <span>Catalogued Tests</span>
+      <strong>{{ cases|length }}</strong>
+      <small>configured checks</small>
+    </div>
+    <div class="metric">
+      <span>Latest Execution</span>
+      <strong>{{ results|length }}</strong>
+      <small>{{ gate.metrics.passed }} passed, {{ gate.metrics.failed }} failed</small>
+    </div>
+    <div class="metric">
+      <span>Code Coverage</span>
+      <strong>{% if coverage is not none %}{{ coverage }}%{% else %}N/A{% endif %}</strong>
+      <small>from pytest + coverage</small>
+    </div>
+    <div class="metric">
+      <span>Release Quality Gate</span>
+      <strong class="{% if gate.decision == 'GO' %}good-text{% else %}bad{% endif %}">{{ gate.decision }}</strong>
+      <small>risk-based gate evaluation</small>
+    </div>
+  </section>
+
+  <!-- SECTION 1: Applications Under Test -->
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>1. Applications Under Test</h2>
+        <p>Register external or local APIs, AI-agent services, or Python projects. Each application maintains its own test plan, defects, and history.</p>
+      </div>
+      <div>
+        <button type="button" onclick="document.getElementById('add-app-drawer').style.display = document.getElementById('add-app-drawer').style.display === 'none' ? 'block' : 'none';" class="primary small">
+          + Register New Application
+        </button>
+      </div>
+    </div>
+
+    <!-- Collapsible Add App Form -->
+    <div id="add-app-drawer" style="display:none; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:20px; margin-bottom:20px;">
+      <h3 style="font-size:15px; margin-bottom:12px;">Register Application Configuration</h3>
+      <form method="post" action="/app/create">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="new_name">Application Name *</label>
+            <input type="text" id="new_name" name="name" placeholder="e.g., WeatherAgent Service" required>
+          </div>
+          <div class="form-group">
+            <label for="new_type">Application Type *</label>
+            <select id="new_type" name="app_type" required>
+              <option value="REST API">REST API</option>
+              <option value="AI agent API">AI agent API</option>
+              <option value="Python project">Python project</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="new_url">Base URL * (http:// or https://)</label>
+            <input type="text" id="new_url" name="base_url" placeholder="http://127.0.0.1:8000 or https://api.my-domain.com" required>
+          </div>
+          <div class="form-group">
+            <label for="new_path">Local Project / Pytest Directory (Optional)</label>
+            <input type="text" id="new_path" name="project_path" placeholder="C:\Projects\my-service">
+          </div>
+          <div class="form-group full-width">
+            <label for="new_desc">Description</label>
+            <input type="text" id="new_desc" name="description" placeholder="Short description of this service and its purpose">
+          </div>
+          <div class="form-group full-width">
+            <label class="checkbox-label">
+              <input type="checkbox" name="auth_confirmed" value="1" required>
+              I confirm that I own this target or have explicit authorization to test it (required for security and automated test execution).
+            </label>
+          </div>
+        </div>
+        <button type="submit" class="primary">Save & Register Application</button>
+      </form>
+    </div>
+
+    <!-- List of Registered Applications -->
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Base URL</th>
+            <th>Authorization</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in apps %}
+          <tr {% if a.id == active_app.id %}style="background-color:#eff6ff;"{% endif %}>
+            <td>#{{ a.id }}</td>
+            <td><strong>{{ a.name }}</strong><br><small style="color:#64748b;">{{ a.description or 'No description' }}</small></td>
+            <td><span class="badge low">{{ a.app_type }}</span></td>
+            <td><code>{{ a.base_url }}</code></td>
+            <td>
+              {% if a.auth_confirmed %}
+                <span class="badge pass">Authorized</span>
+              {% else %}
+                <span class="badge error">Unconfirmed</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if a.id == active_app.id %}
+                <span class="badge pass">Active Context</span>
+              {% else %}
+                <span style="color:#94a3b8; font-size:12px;">Standby</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="actions">
+                {% if a.id != active_app.id %}
+                <form method="post" action="/app/select" style="display:inline;">
+                  <input type="hidden" name="app_id" value="{{ a.id }}">
+                  <button type="submit" class="small primary">Switch To</button>
+                </form>
+                {% endif %}
+                {% if a.id != 1 %}
+                <form method="post" action="/app/delete/{{ a.id }}" style="display:inline;" onsubmit="return confirm('Delete this application and its test history?');">
+                  <button type="submit" class="small danger">Delete</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- SECTION 2: Visual Test Case Builder -->
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>2. Visual Test Case Builder</h2>
+        <p>Define automated test cases for <strong>{{ active_app.name }}</strong> without writing code. Supports REST API assertions and AI-Agent behavioral rules.</p>
+      </div>
+      <div>
+        <button type="button" onclick="document.getElementById('add-test-drawer').style.display = document.getElementById('add-test-drawer').style.display === 'none' ? 'block' : 'none';" class="primary small">
+          + Add New Test Case
+        </button>
+      </div>
+    </div>
+
+    <div id="add-test-drawer" style="display:none; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:20px; margin-bottom:20px;">
+      <form method="post" action="/test/create">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="tc_id">Test ID *</label>
+            <input type="text" id="tc_id" name="test_id" placeholder="e.g., API-POS-001" required>
+          </div>
+          <div class="form-group">
+            <label for="tc_name">Test Name *</label>
+            <input type="text" id="tc_name" name="name" placeholder="e.g., Get user profile returns 200" required>
+          </div>
+          <div class="form-group">
+            <label for="tc_cat">Category</label>
+            <select id="tc_cat" name="category">
+              <option value="Positive">Positive</option>
+              <option value="Negative">Negative</option>
+              <option value="Boundary">Boundary</option>
+              <option value="Security validation">Security validation</option>
+              <option value="AI Agent">AI Agent</option>
+              <option value="Reliability">Reliability</option>
+              <option value="Functional">Functional</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="tc_risk">Severity / Risk</label>
+            <select id="tc_risk" name="risk">
+              <option value="Critical">Critical</option>
+              <option value="High" selected>High</option>
+              <option value="Medium">Medium</option>
+              <option value="Low">Low</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="tc_pri">Priority</label>
+            <select id="tc_pri" name="priority">
+              <option value="P0">P0 (Blocker)</option>
+              <option value="P1" selected>P1 (High)</option>
+              <option value="P2">P2 (Medium)</option>
+              <option value="P3">P3 (Low)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="tc_method">HTTP Method</label>
+            <select id="tc_method" name="method">
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="PATCH">PATCH</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="tc_endpoint">Endpoint Path</label>
+            <input type="text" id="tc_endpoint" name="endpoint_path" placeholder="/api/v1/health or /agent">
+          </div>
+          <div class="form-group">
+            <label for="tc_status">Expected HTTP Status</label>
+            <input type="number" id="tc_status" name="expected_status" value="200" required>
+          </div>
+          <div class="form-group">
+            <label for="tc_max_ms">Max Response Time (ms, optional)</label>
+            <input type="number" id="tc_max_ms" name="max_response_time_ms" placeholder="e.g., 1000">
+          </div>
+          <div class="form-group full-width">
+            <label for="tc_headers">Request Headers (JSON object)</label>
+            <input type="text" id="tc_headers" name="headers_json" value="{}" placeholder='{"Content-Type": "application/json", "X-User-ID": "alice"}'>
+          </div>
+          <div class="form-group full-width">
+            <label for="tc_body">Request Body (JSON string)</label>
+            <textarea id="tc_body" name="body_json" placeholder='{"message": "What is the weather?"}'></textarea>
+          </div>
+          <div class="form-group">
+            <label for="tc_exp_json">Expected Response Fields & Values (JSON)</label>
+            <input type="text" id="tc_exp_json" name="expected_json_json" value="{}" placeholder='{"status": "ok"}'>
+          </div>
+          <div class="form-group">
+            <label for="tc_req_fields">Required Response Keys (JSON array)</label>
+            <input type="text" id="tc_req_fields" name="required_fields_json" value="[]" placeholder='["status", "id"]'>
+          </div>
+          <div class="form-group full-width" style="border-top:1px dashed #cbd5e1; padding-top:14px; margin-top:8px;">
+            <label style="color:#2563eb;">AI-Agent Testing Parameters (Optional)</label>
+            <div class="form-grid" style="margin-top:8px;">
+              <div class="form-group">
+                <label for="tc_type">Test Engine</label>
+                <select id="tc_type" name="test_type">
+                  <option value="api">Standard API Test</option>
+                  <option value="agent">AI-Agent Behavioral Test</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="tc_tool">Expected Agent Tool</label>
+                <input type="text" id="tc_tool" name="agent_expected_tool" placeholder="e.g., weather_lookup">
+              </div>
+              <div class="form-group">
+                <label for="tc_forbid">Forbidden Content (Leak / Prompt Injection Guard)</label>
+                <input type="text" id="tc_forbid" name="agent_forbidden_content" placeholder="e.g., secret_token, internal_key">
+              </div>
+            </div>
+          </div>
+        </div>
+        <button type="submit" class="primary">Save Test Case to Active Plan</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- SECTION 3: Test Execution & Test Catalogue -->
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>3. Automated Test Execution & Catalogue</h2>
+        <p>Target: <strong>{{ active_app.name }}</strong> (<code>{{ active_app.base_url }}</code>)</p>
+      </div>
+      <div class="actions">
+        <form method="post" action="/run/tests"><button type="submit" class="primary">▶ Run All Configured Tests</button></form>
+        {% if active_app.id == 1 %}
+          <form method="post" action="/run/functional"><button type="submit">Run Bundled Functional Tests</button></form>
+          <form method="post" action="/run/api"><button type="submit">Run API Contract Suite</button></form>
+        {% endif %}
+        <form method="post" action="/coverage"><button type="submit">Measure Code Coverage</button></form>
+      </div>
+    </div>
+
+    {% if active_app.id == 1 %}
+    <div class="toggle-box">
+      <div>
+        <b>Controlled Demo Defect Injection</b>
+        <p>Injects an intentional reliability bug into the bundled SUT where tool timeout returns false success (HTTP 200).</p>
+      </div>
+      <form method="post" action="/toggle-bug">
+        <label class="checkbox-label">
+          <input type="checkbox" name="enabled" value="1" {% if bug %}checked{% endif %} onchange="this.form.submit()">
+          Inject demo defect
+        </label>
+      </form>
+    </div>
+    {% endif %}
+
+    <div class="table-scroll" style="margin-top:16px;">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Category</th>
+            <th>Risk</th>
+            <th>Priority</th>
+            <th>Method & Endpoint</th>
+            <th>Expected Outcome</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in cases %}
+          <tr>
+            <td class="mono"><strong>{{ c.test_id or c.id }}</strong></td>
+            <td>{{ c.name }}</td>
+            <td><span class="badge low">{{ c.category }}</span></td>
+            <td><span class="badge {{ c.risk|lower }}">{{ c.risk }}</span></td>
+            <td><span class="badge {{ c.priority|lower }}">{{ c.priority }}</span></td>
+            <td><code>{{ c.method or 'GET' }} {{ c.endpoint_path or '/health' }}</code></td>
+            <td style="font-size:12px;">{{ c.expected or 'HTTP ' ~ c.expected_status }}</td>
+            <td>
+              <div class="actions">
+                <form method="post" action="/run/test/{{ c.test_id or c.id }}" style="display:inline;">
+                  <button type="submit" class="small">Run</button>
+                </form>
+                {% if c.id and active_app.id != 1 %}
+                <form method="post" action="/test/delete/{{ c.id }}" style="display:inline;" onsubmit="return confirm('Delete this test case?');">
+                  <button type="submit" class="small danger">Delete</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- SECTION 4: Latest Execution Evidence -->
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>4. Latest Execution Evidence</h2>
+        <p>Live responses, assertion outcomes, and response-time evidence from the latest run.</p>
+      </div>
+    </div>
+    {% if results %}
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Test ID</th>
+              <th>Test Name</th>
+              <th>Status</th>
+              <th>Expected</th>
+              <th>Actual</th>
+              <th>Latency</th>
+              <th>Evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in results %}
+            <tr>
+              <td class="mono"><strong>{{ r.test_id }}</strong></td>
+              <td>{{ r.name }}</td>
+              <td><span class="badge {{ r.status|lower }}">{{ r.status }}</span></td>
+              <td><code>{{ r.expected }}</code></td>
+              <td><code>{{ r.actual }}</code></td>
+              <td>{{ r.elapsed_ms or 0 }} ms</td>
+              <td><code>{{ r.evidence }}</code></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">No tests executed yet for <strong>{{ active_app.name }}</strong>. Click <b>Run All Configured Tests</b> above to generate execution evidence.</div>
+    {% endif %}
+  </section>
+
+  <!-- SECTION 5: AI-Agent Dedicated Testing Module -->
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>5. AI-Agent Testing Module</h2>
+        <p>Verify tool selection, prompt-injection defense, ambiguity handling, timeout honesty, and determinism.</p>
+      </div>
+    </div>
+
+    <form method="post" action="/run/agent-behavior" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:20px;">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="agent_endpoint">Agent API Endpoint Path</label>
+          <input type="text" id="agent_endpoint" name="endpoint" value="/agent" required>
+        </div>
+        <div class="form-group">
+          <label for="agent_check_type">Verification Model</label>
+          <select id="agent_check_type" name="check_type">
+            <option value="Deterministic">Deterministic (Exact Tool & Code match)</option>
+            <option value="Probabilistic">Probabilistic (Repeated Consistency check)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="agent_repeat">Repeat Query Count</label>
+          <input type="number" id="agent_repeat" name="repeat_count" value="1" min="1" max="5">
+        </div>
+        <div class="form-group">
+          <label for="agent_status">Expected Status Code</label>
+          <input type="number" id="agent_status" name="expected_status" value="200" required>
+        </div>
+        <div class="form-group full-width">
+          <label for="agent_template">Request Payload Template (Supports <code>{prompt}</code> and <code>{user_id}</code> placeholders)</label>
+          <input type="text" id="agent_template" name="template" value='{"message": "{prompt}", "user_id": "{user_id}"}' required>
+        </div>
+        <div class="form-group full-width">
+          <label for="agent_prompt">Input Prompt to Send Agent</label>
+          <input type="text" id="agent_prompt" name="prompt" value="What's the weather in Tokyo?" required>
+        </div>
+        <div class="form-group">
+          <label for="agent_expected_tool">Expected Tool Invocations</label>
+          <input type="text" id="agent_expected_tool" name="expected_tool" value="weather_lookup">
+        </div>
+        <div class="form-group">
+          <label for="agent_forbidden">Forbidden Strings / Data Leak Guard (Comma-separated)</label>
+          <input type="text" id="agent_forbidden" name="forbidden_strings" placeholder="admin_password, api_key_secret">
+        </div>
+      </div>
+      <button type="submit" class="primary">Execute AI-Agent Behavior Test</button>
+      <small style="display:block; margin-top:8px; color:#64748b;">
+        * Note: Passing behavioral checks verifies compliance with specific test assertions; it does not claim to prove an agent is unconditionally safe.
+      </small>
+    </form>
+  </section>
+
+  <!-- SECTION 6: Custom Python Test Suite Runner -->
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>6. Custom Python Project & Pytest Suites</h2>
+        <p>Run pytest in an isolated subprocess against a local Python codebase or test suite.</p>
+      </div>
+    </div>
+    <form method="post" action="/run/pytest" class="actions" style="margin-bottom:12px;">
+      <input type="text" name="project_path" placeholder="Path to Python project directory (e.g. C:\Users\...)" value="{{ active_app.project_path }}" style="flex:1; min-width:300px;">
+      <button type="submit" class="primary">Run Pytest Suite in Subprocess</button>
+    </form>
+    <small style="color:#64748b;">Pytest runs in a restricted subprocess with timeout limits to prevent arbitrary code execution within the web process.</small>
+  </section>
+
+  <!-- TWO-COLUMN: Defect Tracking & Security Scanner -->
+  <section class="two-col">
+    <!-- Defect Tracking -->
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>7. Defect Tracking & Retesting</h2>
+          <p>Failed tests automatically log defects for <strong>{{ active_app.name }}</strong>.</p>
+        </div>
+      </div>
+
+      {% if defects %}
+        <div class="defect-list">
+          {% for d in defects %}
+            <article class="defect-card">
+              <div class="defect-card-header">
+                <div>
+                  <strong>#{{ d.id }} · {{ d.title }}</strong>
+                  <div style="font-size:11px; color:#64748b; margin-top:2px;">
+                    Test: <code>{{ d.test_id }}</code> · Updated: {{ d.updated_at[:19].replace('T', ' ') }}
+                  </div>
+                </div>
+                <div style="display:flex; gap:6px;">
+                  <span class="badge {{ d.severity|lower }}">{{ d.severity }}</span>
+                  <span class="badge {{ d.priority|lower }}">{{ d.priority }}</span>
+                </div>
+              </div>
+
+              <div class="defect-card-body">
+                <p><strong>Actual:</strong> <code>{{ d.actual or d.evidence }}</code></p>
+                {% if d.reproduction_steps %}
+                  <p><strong>Reproduction:</strong> <span style="font-size:11px; color:#64748b;">{{ d.reproduction_steps }}</span></p>
+                {% endif %}
+              </div>
+
+              <div class="defect-actions">
+                <form method="post" action="/defect/{{ d.id }}/retest" style="display:inline;">
+                  <button type="submit" class="small primary">↻ Retest & Verify</button>
+                </form>
+
+                <form method="post" action="/defect/{{ d.id }}" style="display:inline-flex; gap:6px;">
+                  <select name="status" style="padding:4px 8px; font-size:11px;">
+                    {% for s in ['Open', 'In Progress', 'Resolved', 'Closed'] %}
+                      <option {% if d.status == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit" class="small">Update</button>
+                </form>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">Zero open defects recorded for this application. All tests are passing!</div>
+      {% endif %}
+    </div>
+
+    <!-- Security Baseline Scanner -->
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>8. Passive & Baseline Security Testing</h2>
+          <p>Safe baseline checks: HTTP headers, banner disclosure, TLS configuration, and input bounds.</p>
+        </div>
+      </div>
+
+      <form method="post" action="/scan" style="display:grid; gap:10px; margin-bottom:16px;">
+        <label for="scan_target">Target URL</label>
+        <input type="text" id="scan_target" name="target" value="{{ active_app.base_url }}" required>
+
+        <label class="checkbox-label">
+          <input type="checkbox" name="auth_confirmed" value="1" {% if active_app.auth_confirmed %}checked{% endif %} required>
+          I have explicit ownership/authorization to run security baseline checks against this target.
+        </label>
+
+        <div>
+          <button type="submit" class="primary">Execute Security Baseline Scan</button>
+        </div>
+      </form>
+
+      {% if scan %}
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; font-size:12px; margin-bottom:12px;">
+          <strong>Target:</strong> <code>{{ scan.target }}</code> |
+          <strong>Status:</strong> HTTP {{ scan.status_code }} |
+          <strong>Latency:</strong> {{ scan.response_time_ms }} ms |
+          <strong>Findings:</strong> {{ scan.finding_count }}
+          {% if scan.tls_info %}
+            <br><strong>TLS Version:</strong> {{ scan.tls_info.version }} ({{ scan.tls_info.cipher }})
+          {% endif %}
+        </div>
+
+        {% if scan.findings %}
+          <ul style="list-style:none; padding:0; display:grid; gap:8px;">
+            {% for f in scan.findings %}
+              <li style="border-bottom:1px solid #f1f5f9; padding-bottom:6px; font-size:12px;">
+                <span class="badge {{ f.severity|lower }}">{{ f.severity }}</span>
+                <strong style="margin-left:6px;">{{ f.title }}</strong>
+                <p style="color:#64748b; margin:3px 0 0;">{{ f.detail }}</p>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="empty">No baseline security findings detected. Good HTTP hygiene!</div>
+        {% endif %}
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- SECTION 9: Risk-Based Release Quality Gate -->
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>9. Risk-Based Release Quality Gate</h2>
+        <p>Evidence-based GO / NO-GO decision for <strong>{{ active_app.name }}</strong>.</p>
+      </div>
+      <div>
+        <span class="badge {% if gate.decision == 'GO' %}pass{% else %}fail{% endif %}" style="font-size:16px; padding:8px 14px;">
+          DECISION: {{ gate.decision }}
+        </span>
+      </div>
+    </div>
+
+    <div class="decision-banner {% if gate.decision == 'GO' %}go{% elif gate.decision == 'NO-GO' %}no-go{% else %}not-eval{% endif %}">
+      <div>
+        <div class="decision-tag">STATUS: {{ gate.decision }}</div>
+        <div style="font-size:13px; margin-top:4px;">
+          {% if gate.decision == 'GO' %}
+            All release criteria satisfied. No blocking test failures or unresolved Critical/High defects.
+          {% else %}
+            Release blocked due to one or more unsatisfied quality criteria.
+          {% endif %}
+        </div>
+      </div>
+      <div style="text-align:right; font-size:12px;">
+        Pass Rate: <strong>{{ gate.metrics.pass_rate_percent }}%</strong><br>
+        Open Crit/High Defects: <strong>{{ gate.metrics.open_critical + gate.metrics.open_high }}</strong>
+      </div>
+    </div>
+
+    {% if gate.blockers %}
+      <div class="blockers-list">
+        <strong>Release Blockers:</strong>
+        <ul style="margin-top:6px; padding-left:20px;">
+          {% for b in gate.blockers %}
+            <li>{{ b }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="actions">
+      <form method="post" action="/report">
+        <input type="hidden" name="format" value="html">
+        <button type="submit" class="primary">Download Audit Report (HTML)</button>
+      </form>
+      <form method="post" action="/report">
+        <input type="hidden" name="format" value="json">
+        <button type="submit">Download Audit Evidence (JSON)</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- SECTION 10: Execution History -->
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>10. Execution History</h2>
+        <p>Audit trail of test runs and pytest suites for <strong>{{ active_app.name }}</strong>.</p>
+      </div>
+    </div>
+
+    {% if runs %}
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Run ID</th>
+              <th>Suite Type</th>
+              <th>Timestamp (UTC)</th>
+              <th>Passed</th>
+              <th>Failed / Errors</th>
+              <th>Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in runs %}
+              <tr>
+                <td>#{{ r.id }}</td>
+                <td><strong>{{ r.run_type }}</strong></td>
+                <td>{{ r.created_at[:19].replace('T', ' ') }}</td>
+                <td style="color:#16a34a; font-weight:bold;">{{ r.passed }}</td>
+                <td style="color:{% if r.failed > 0 %}#dc2626{% else %}#64748b{% endif %}; font-weight:bold;">{{ r.failed }}</td>
+                <td>{{ r.duration_ms or 0 }} ms</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">No test execution history recorded for this application.</div>
+    {% endif %}
+  </section>
+
+  <footer>
+    AgentGuard QA Platform · Evidence-based software quality gate · Non-destructive testing · Offline & Local First
+  </footer>
+</main>
+
+</body>
+</html>
