@@ -14,6 +14,7 @@ from agentguard.security import validate_target_url
 from agentguard.runner import run_tests_for_app, execute_single_test
 from agentguard.agent_tester import execute_agent_behavior_check, STANDARD_AGENT_TEST_TEMPLATES, AI_AGENT_CATEGORIES
 from agentguard.pytest_runner import run_pytest_suite
+from agentguard.selenium_runner import run_browser_test
 
 ROOT = Path(__file__).resolve().parent
 app = Flask(__name__)
@@ -601,6 +602,43 @@ def api_status():
 @app.get("/api/apps")
 def api_apps():
     return jsonify(rows("SELECT * FROM applications ORDER BY id ASC"))
+
+
+# --- Selenium Browser Testing ---
+
+@app.post("/api/browser-test")
+def api_browser_test():
+    """
+    Executes an automated Selenium browser verification check.
+    Accepts JSON: {"url": "...", "expected_title": "..."} or form data.
+    """
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+    else:
+        data = request.form.to_dict()
+
+    target_url = (data.get("url") or "").strip()
+    expected_title = (data.get("expected_title") or "").strip() or None
+
+    if not target_url:
+        return jsonify({
+            "status": "FAIL",
+            "url": "",
+            "page_title": None,
+            "final_url": None,
+            "duration_ms": 0,
+            "tests": [{
+                "id": "BG-004",
+                "name": "Target URL validation",
+                "status": "FAIL",
+                "detail": "Target URL cannot be empty."
+            }],
+            "error": "URL parameter is required."
+        }), 400
+
+    result = run_browser_test(target_url, expected_title=expected_title)
+    status_code = 200 if result["status"] == "PASS" else 422
+    return jsonify(result), status_code
 
 
 if __name__ == "__main__":

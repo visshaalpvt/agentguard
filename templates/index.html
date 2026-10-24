@@ -687,6 +687,130 @@
     {% else %}
       <div class="empty">No test execution history recorded for this application.</div>
     {% endif %}
+  <!-- SECTION 11: Automated Browser Test Runner (Selenium) -->
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>11. Automated Browser Test Runner (Selenium)</h2>
+        <p>Execute real browser-level verification using headless Selenium WebDriver. Evaluates page load, URL validation, and title assertions.</p>
+      </div>
+      <div>
+        <span class="badge" style="background:#e0f2fe; color:#0369a1; border-color:#bae6fd;">WebDriver: Headless</span>
+      </div>
+    </div>
+
+    <form id="browser-test-form" onsubmit="runBrowserTest(event)" style="display:grid; grid-template-columns: 2fr 1.5fr auto; gap:12px; align-items:end; margin-bottom:16px;">
+      <div>
+        <label for="browser_url" style="display:block; font-size:12px; font-weight:600; margin-bottom:4px;">Target URL *</label>
+        <input type="url" id="browser_url" name="url" value="{{ active_app.base_url }}" placeholder="http://127.0.0.1:5000/sut/health" required style="width:100%; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+      </div>
+      <div>
+        <label for="browser_expected_title" style="display:block; font-size:12px; font-weight:600; margin-bottom:4px;">Expected Title (optional)</label>
+        <input type="text" id="browser_expected_title" name="expected_title" placeholder="e.g. AgentGuard or Example" style="width:100%; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+      </div>
+      <div>
+        <button type="submit" id="browser_run_btn" class="primary" style="padding:9px 18px; font-size:13px;">
+          ▶ Run Browser Test
+        </button>
+      </div>
+    </form>
+
+    <div id="browser-test-results" style="display:none; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-top:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div>
+          <span id="browser_status_badge" class="badge"></span>
+          <strong id="browser_summary_text" style="margin-left:8px; font-size:14px;"></strong>
+        </div>
+        <div style="font-size:12px; color:#64748b;">
+          Duration: <strong id="browser_duration"></strong> · Title: <code id="browser_title"></code>
+        </div>
+      </div>
+      <div id="browser_error_box" style="display:none; color:#dc2626; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:10px; margin-bottom:12px; font-size:12px;"></div>
+      <table style="width:100%; font-size:12px; border-collapse:collapse;">
+        <thead>
+          <tr style="text-align:left; border-bottom:1px solid #cbd5e1;">
+            <th style="padding:6px;">Check ID</th>
+            <th style="padding:6px;">Check Name</th>
+            <th style="padding:6px;">Status</th>
+            <th style="padding:6px;">Details</th>
+          </tr>
+        </thead>
+        <tbody id="browser_checks_tbody">
+        </tbody>
+      </table>
+    </div>
+
+    <script>
+      async function runBrowserTest(e) {
+        e.preventDefault();
+        const btn = document.getElementById('browser_run_btn');
+        const resBox = document.getElementById('browser-test-results');
+        const errBox = document.getElementById('browser_error_box');
+        const badge = document.getElementById('browser_status_badge');
+        const summary = document.getElementById('browser_summary_text');
+        const dur = document.getElementById('browser_duration');
+        const titleEl = document.getElementById('browser_title');
+        const tbody = document.getElementById('browser_checks_tbody');
+
+        const url = document.getElementById('browser_url').value;
+        const expected_title = document.getElementById('browser_expected_title').value;
+
+        btn.disabled = true;
+        btn.textContent = '⏳ Executing Browser Test...';
+        resBox.style.display = 'block';
+        errBox.style.display = 'none';
+        badge.className = 'badge';
+        badge.textContent = 'RUNNING';
+        summary.textContent = 'Launching headless browser...';
+        dur.textContent = '...';
+        titleEl.textContent = '...';
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:12px; color:#64748b;">Initializing WebDriver and navigating...</td></tr>';
+
+        try {
+          const resp = await fetch('/api/browser-test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url, expected_title})
+          });
+          const data = await resp.json();
+          
+          btn.disabled = false;
+          btn.textContent = '▶ Run Browser Test';
+
+          badge.className = data.status === 'PASS' ? 'badge pass' : 'badge fail';
+          badge.textContent = data.status;
+          summary.textContent = data.status === 'PASS' ? 'All browser checks completed successfully.' : 'One or more browser checks failed.';
+          dur.textContent = (data.duration_ms || 0) + ' ms';
+          titleEl.textContent = data.page_title || '(none)';
+
+          if (data.error) {
+            errBox.style.display = 'block';
+            errBox.textContent = data.error;
+          }
+
+          tbody.innerHTML = '';
+          (data.tests || []).forEach(t => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid #f1f5f9';
+            tr.innerHTML = `
+              <td style="padding:6px; font-weight:600;"><code>${t.id || '-'}</code></td>
+              <td style="padding:6px;">${t.name}</td>
+              <td style="padding:6px;"><span class="badge ${t.status === 'PASS' ? 'pass' : 'fail'}">${t.status}</span></td>
+              <td style="padding:6px; color:#475569;">${t.detail || ''}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = '▶ Run Browser Test';
+          badge.className = 'badge fail';
+          badge.textContent = 'ERROR';
+          summary.textContent = 'Failed to execute browser test request.';
+          errBox.style.display = 'block';
+          errBox.textContent = err.toString();
+        }
+      }
+    </script>
   </section>
 
   <footer>
