@@ -619,6 +619,13 @@ def api_browser_test():
 
     target_url = (data.get("url") or "").strip()
     expected_title = (data.get("expected_title") or "").strip() or None
+    raw_headless = data.get("headless")
+    if raw_headless is None:
+        headless = True
+    elif isinstance(raw_headless, bool):
+        headless = raw_headless
+    else:
+        headless = str(raw_headless).lower() in ("true", "1", "yes")
 
     if not target_url:
         return jsonify({
@@ -636,7 +643,7 @@ def api_browser_test():
             "error": "URL parameter is required."
         }), 400
 
-    result = run_browser_test(target_url, expected_title=expected_title)
+    result = run_browser_test(target_url, expected_title=expected_title, headless=headless)
     status_code = 200 if result["status"] == "PASS" else 422
     return jsonify(result), status_code
 

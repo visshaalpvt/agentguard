@@ -699,7 +699,7 @@
       </div>
     </div>
 
-    <form id="browser-test-form" onsubmit="runBrowserTest(event)" style="display:grid; grid-template-columns: 2fr 1.5fr auto; gap:12px; align-items:end; margin-bottom:16px;">
+    <form id="browser-test-form" onsubmit="runBrowserTest(event)" style="display:grid; grid-template-columns: 2fr 1.5fr auto; gap:12px; align-items:end; margin-bottom:8px;">
       <div>
         <label for="browser_url" style="display:block; font-size:12px; font-weight:600; margin-bottom:4px;">Target URL *</label>
         <input type="url" id="browser_url" name="url" value="{{ active_app.base_url }}" placeholder="http://127.0.0.1:5000/sut/health" required style="width:100%; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
@@ -714,6 +714,12 @@
         </button>
       </div>
     </form>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:12px; color:#475569; display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="checkbox" id="browser_visible_mode">
+        <strong>Open visible browser window</strong> (pop up real browser window on screen to watch execution)
+      </label>
+    </div>
 
     <div id="browser-test-results" style="display:none; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-top:12px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
@@ -754,14 +760,16 @@
 
         const url = document.getElementById('browser_url').value;
         const expected_title = document.getElementById('browser_expected_title').value;
+        const visibleMode = document.getElementById('browser_visible_mode').checked;
+        const headless = !visibleMode;
 
         btn.disabled = true;
-        btn.textContent = '⏳ Executing Browser Test...';
+        btn.textContent = visibleMode ? '⏳ Launching Browser Window...' : '⏳ Executing Browser Test...';
         resBox.style.display = 'block';
         errBox.style.display = 'none';
         badge.className = 'badge';
         badge.textContent = 'RUNNING';
-        summary.textContent = 'Launching headless browser...';
+        summary.textContent = visibleMode ? 'Opening visible browser window on your desktop...' : 'Launching headless browser...';
         dur.textContent = '...';
         titleEl.textContent = '...';
         tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:12px; color:#64748b;">Initializing WebDriver and navigating...</td></tr>';
@@ -770,7 +778,7 @@
           const resp = await fetch('/api/browser-test', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({url, expected_title})
+            body: JSON.stringify({url, expected_title, headless})
           });
           const data = await resp.json();
           

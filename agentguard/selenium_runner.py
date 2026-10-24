@@ -1,5 +1,6 @@
 """Selenium Browser Testing Runner for AgentGuard.
 Automates browser verification using Selenium WebDriver with SSRF protection and structured PASS/FAIL reporting.
+Supports both headless execution and visible pop-up browser execution.
 """
 import glob
 import os
@@ -26,8 +27,8 @@ def _find_cached_driver(browser_name: str) -> str | None:
     return None
 
 
-def _create_webdriver(timeout: int = 10):
-    """Initializes a headless Edge or Chrome WebDriver instance."""
+def _create_webdriver(timeout: int = 15, headless: bool = True):
+    """Initializes an Edge or Chrome WebDriver instance with eager load strategy."""
     from selenium import webdriver
     from selenium.webdriver.edge.options import Options as EdgeOptions
     from selenium.webdriver.edge.service import Service as EdgeService
@@ -39,10 +40,15 @@ def _create_webdriver(timeout: int = 10):
     # 1. Try Microsoft Edge (Standard on Windows)
     try:
         edge_opts = EdgeOptions()
-        edge_opts.add_argument("--headless=new")
+        edge_opts.page_load_strategy = "eager"  # Avoids renderer timeout on heavy resources
+        if headless:
+            edge_opts.add_argument("--headless=new")
         edge_opts.add_argument("--disable-gpu")
         edge_opts.add_argument("--no-sandbox")
         edge_opts.add_argument("--disable-dev-shm-usage")
+        edge_opts.add_argument("--disable-software-rasterizer")
+        edge_opts.add_argument("--disable-extensions")
+        edge_opts.add_argument("--remote-allow-origins=*")
         edge_opts.add_argument("--window-size=1280,800")
 
         cached_edge = _find_cached_driver("msedgedriver")
@@ -53,17 +59,23 @@ def _create_webdriver(timeout: int = 10):
             driver = webdriver.Edge(options=edge_opts)
 
         driver.set_page_load_timeout(timeout)
-        return driver, "MicrosoftEdge"
+        mode = "Headless" if headless else "Visible Window"
+        return driver, f"MicrosoftEdge ({mode})"
     except Exception as e:
         errors.append(f"Edge: {e}")
 
     # 2. Try Google Chrome
     try:
         chrome_opts = ChromeOptions()
-        chrome_opts.add_argument("--headless=new")
+        chrome_opts.page_load_strategy = "eager"
+        if headless:
+            chrome_opts.add_argument("--headless=new")
         chrome_opts.add_argument("--disable-gpu")
         chrome_opts.add_argument("--no-sandbox")
         chrome_opts.add_argument("--disable-dev-shm-usage")
+        chrome_opts.add_argument("--disable-software-rasterizer")
+        chrome_opts.add_argument("--disable-extensions")
+        chrome_opts.add_argument("--remote-allow-origins=*")
         chrome_opts.add_argument("--window-size=1280,800")
 
         cached_chrome = _find_cached_driver("chromedriver")
@@ -74,14 +86,20 @@ def _create_webdriver(timeout: int = 10):
             driver = webdriver.Chrome(options=chrome_opts)
 
         driver.set_page_load_timeout(timeout)
-        return driver, "Chrome"
+        mode = "Headless" if headless else "Visible Window"
+        return driver, f"Chrome ({mode})"
     except Exception as e:
         errors.append(f"Chrome: {e}")
 
     raise RuntimeError(f"Unable to initialize WebDriver: {'; '.join(errors)}")
 
 
-def run_browser_test(url: str, expected_title: str | None = None, timeout: int = 10) -> dict:
+def run_browser_test(
+    url: str,
+    expected_title: str | None = None,
+    timeout: int = 15,
+    headless: bool = True
+) -> dict:
     """
     Executes a structured browser verification test against the given target URL.
     Enforces SSRF prevention, bounds execution timeouts, and guarantees cleanup.
@@ -122,12 +140,12 @@ def run_browser_test(url: str, expected_title: str | None = None, timeout: int =
     try:
         # BG-001: Browser Starts
         try:
-            driver, browser_name = _create_webdriver(timeout=timeout)
+            driver, browser_name = _create_webdriver(timeout=timeout, headless=headless)
             tests.append({
                 "id": "BG-001",
                 "name": "Browser initialization",
                 "status": "PASS",
-                "detail": f"Headless {browser_name} WebDriver started successfully."
+                "detail": f"{browser_name} WebDriver started successfully."
             })
         except Exception as e:
             tests.append({
@@ -141,6 +159,9 @@ def run_browser_test(url: str, expected_title: str | None = None, timeout: int =
         # BG-002: Page Loads
         try:
             driver.get(url)
+            # Give short pause if in visible mode so the user can see the page
+            if not headless:
+                time.sleep(1.5)
             final_url = driver.current_url
             tests.append({
                 "id": "BG-002",
